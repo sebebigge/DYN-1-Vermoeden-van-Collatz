@@ -186,6 +186,26 @@ def save_figure(fig, name, folder=OUT):
 
 
 """
+Efficiency gain in time: share of the brute-force time that is saved (%).
+Unlike the step count, the brute-force time cannot be derived, so brute force
+must have been run. Negative values mean slower than brute force.
+"""
+def plot_time_saved(limits, times, ymin=None):
+    if "brute force" not in times:
+        raise ValueError("plot_time_saved needs brute-force timings (include_brute_force=True)")
+    brute = np.array(times["brute force"])
+    with np.errstate(divide="ignore", invalid="ignore"):
+        saved = {name: 100 * (1 - np.array(t) / brute)
+                 for name, t in times.items() if name != "brute force"}
+    fig, ax = _lines_vs_max(limits, saved, "Time saved (%)", logy=False)
+    ax.axhline(0, color="grey", linewidth=0.8)
+    ax.set_ylim(top=100)
+    if ymin is not None:
+        ax.set_ylim(bottom=ymin)
+    return fig
+
+
+"""
 Draw all five plots, each in its own figure.
 """
 def plot_all(results, show: bool = True, save_figs: bool = True, folder=None):
@@ -193,13 +213,14 @@ def plot_all(results, show: bool = True, save_figs: bool = True, folder=None):
     if folder is None:
         folder = os.path.join(OUT, f"N{max(limits)}")
     with plt.rc_context(STYLE_RC):
-        figs = {
+        """figs = {
             "fig1_total_steps": plot_operations(limits, results["operations"]),
             "fig2_steps_per_number": plot_steps_per_number(limits, results["operations"]),
             "fig3_time": plot_times(limits, results["times"], results["runs"]),
             "fig4_share_saved": plot_saved_share(limits, results["operations"], steps),
             "fig5_steps_per_start_value": plot_steps_vs_n(steps),
-        }
+        }"""
+        figs = {"fig6_time_saved": plot_time_saved(limits, results["times"])}
         if save_figs:
             for name, fig in figs.items():
                 save_figure(fig, name, folder)
@@ -230,18 +251,11 @@ def timer(function, max_n):
 
 
 """
-Run the methods for several values of MAX and collect:
-- times[method][k]       best time over `runs` runs for limits[k]
-- operations[method][k]  number of steps/calls performed for limits[k]
-- steps[n]               Collatz steps for each n <= max_n
-Brute force is only run when include_brute_force=True (it is far slower).
-Best-of-`runs` is used for time because noise only ever makes a run slower.
+Run the given methods for several values of MAX, collect times/operations/steps
+and plot the results. Used by test_main and test_bottom_up.
 """
-def test_main(max_n: int, runs: int = 5, nbPoints: int = 10, min_n: int = 2,
-              include_brute_force: bool = False, show: bool = True,
-              save_figs: bool = True, folder=None):
-    methods = {name: f for name, f in METHODS.items()
-               if include_brute_force or name != "brute force"}
+def run_benchmark(methods: dict, max_n: int, runs: int, nbPoints: int, min_n: int,
+                  show: bool, save_figs: bool, folder):
     limits = [int(l) for l in
               np.unique(np.round(np.logspace(np.log10(min_n), np.log10(max_n), nbPoints)).astype(int))]
     times = {name: [] for name in methods}
@@ -263,7 +277,7 @@ def test_main(max_n: int, runs: int = 5, nbPoints: int = 10, min_n: int = 2,
             print(f"{limit:>10} | {name:<11} | {best:>9.4f} | {ops:>13,}")
         print("-" * 52)
         steps = reference
-    if include_brute_force:    # brute-force operations must equal sum(steps[1..MAX])
+    if "brute force" in methods:    # brute-force operations must equal sum(steps[1..MAX])
         cumulative = np.cumsum(steps)
         assert all(o == cumulative[l] for o, l in zip(operations["brute force"], limits))
     results = {"limits": limits, "times": times, "operations": operations,
@@ -272,10 +286,33 @@ def test_main(max_n: int, runs: int = 5, nbPoints: int = 10, min_n: int = 2,
     return results
 
 
+"""
+Brute force is only run when include_brute_force=True (it is far slower).
+"""
+def test_main(max_n: int, runs: int = 5, nbPoints: int = 10, min_n: int = 2,
+              include_brute_force: bool = False, show: bool = True,
+              save_figs: bool = True, folder=None):
+    methods = {name: f for name, f in METHODS.items()
+               if include_brute_force or name != "brute force"}
+    return run_benchmark(methods, max_n, runs, nbPoints, min_n, show, save_figs, folder)
+
+
+"""
+Run only the bottom-up method. Figures go to their own folder so they do
+not overwrite those of test_main.
+"""
+def test_bottom_up(max_n: int, runs: int = 5, nbPoints: int = 10, min_n: int = 2,
+                   show: bool = True, save_figs: bool = True, folder=None):
+    if folder is None:
+        folder = os.path.join(OUT, f"N{max_n}_bottom_up")
+    methods = {"bottom-up": bottom_up_list}
+    return run_benchmark(methods, max_n, runs, nbPoints, min_n, show, save_figs, folder)
+
+
 if __name__ == "__main__":
-    for size in [1000, 10_000, 100_000, 1_000_000, 10_000_000, 100_000_000]:
+    for size in [100, 1_000, 10_000, 100_000, 1_000_000, 10_000_000]:
         start_ = time.perf_counter()
-        test_main(size, runs=5, nbPoints=10, include_brute_force=True, show = False)
+        test_main(size, show=False, include_brute_force=True)
         print(f"Total: {time.perf_counter() - start_:.1f} s")
 
 
